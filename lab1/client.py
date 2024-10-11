@@ -21,8 +21,10 @@ def handle_workload(s):
         task = s.recv(1024).decode()
         if task == "calculate_pi":
             result = calculate_pi()
-            time.sleep(random.randint(1,10))
-            print(f"Calculated Pi: {result}")
+            # time.sleep(random.randint(1, 5))  # Simulate processing time
+            task_end_time = time.time()  # Record task end time
+            print(f"Calculated Pi: {result}, completed at {task_end_time}")
+            s.sendall(f"task_complete {task_end_time}\n".encode('utf-8'))
         elif task == "exit":
             print("Exiting...")
             break
