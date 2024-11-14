@@ -44,7 +44,6 @@ def calculate_pi(num_samples=1000000):
 
     return pi_estimate
 
-# Main client function
 def main(args):
     ip_port = (args.ip, args.port)
     s = socket.socket()
@@ -58,6 +57,6 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="CISC-6935 lab-1 client")
     parser.add_argument("--ip", type=str, default='127.0.0.1', help="IP address")
-    parser.add_argument("--port", type=int, default=64432, help="Port number")
+    parser.add_argument("--port", type=int, default=9999, help="Port number")
     args = parser.parse_args()
     main(args)

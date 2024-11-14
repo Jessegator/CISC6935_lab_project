@@ -68,11 +68,9 @@ def link_handler(args, conn, addr):
         if tasks_assigned < args.num_tasks:
             time.sleep(10)
             if args.load_balancer == "lowest_cpu":
-                # print(f"task assigned: {tasks_assigned}")
-                # print(f"task complete: {completed_tasks}")
-                assign_task_based_on_cpu_usage()
+                assign_task_based_on_cpu_usage(args)
             elif args.load_balancer == "rr":
-                assign_task_round_robin()
+                assign_task_round_robin(args)
             else:
                 raise ValueError(f"Load balancer {args.load_balancer} is not supported")
 
@@ -93,16 +91,15 @@ def detect_idle_workers():
         current_time = time.time()
         idle_workers = []
         for worker in workers:
-            # cpu_idle = worker['cpu_usage'] < IDLE_CPU_THRESHOLD
             time_idle = (current_time - worker['last_task_time']) > IDLE_TIME_THRESHOLD  # Time since last task, not report
             if time_idle:
                 idle_workers.append(worker)
                 print(f"Worker {worker['addr']} is idle (CPU Usage: {worker['cpu_usage']}, Idle for {current_time - worker['last_task_time']} seconds)")
         time.sleep(5)  # Check every 5 seconds
 
-def assign_task_to_worker(worker):
+def assign_task_to_worker(args, worker):
     global tasks_assigned
-    if not worker['busy'] and tasks_assigned < 20:
+    if not worker['busy'] and tasks_assigned < args.num_tasks:
         conn = worker['conn']
         addr = worker['addr']
         assign_task(conn, addr, "calculate_pi")
@@ -110,34 +107,28 @@ def assign_task_to_worker(worker):
         worker['busy'] = True  # Mark worker as busy
         tasks_assigned += 1
         print(f"Task assigned to worker {addr}")
+
 # Assign tasks based on lowest CPU usage
-def assign_task_based_on_cpu_usage():
+def assign_task_based_on_cpu_usage(args):
     global tasks_assigned
-    if workers and tasks_assigned < 20:
+    if workers and tasks_assigned < args.num_tasks:
         # Select the worker with the lowest CPU usage
         available_workers = [w for w in workers if not w['busy']]
         if available_workers:
 
             selected_worker = min(workers, key=lambda w: w['cpu_usage'])
-            assign_task_to_worker(selected_worker)
-            # print(f"Task assigned to worker {selected_worker['addr']} with lowest CPU usage: {selected_worker['cpu_usage']}")
+            assign_task_to_worker(args, selected_worker)
         time.sleep(1)
 
 
-def assign_task_round_robin():
+def assign_task_round_robin(args):
     global tasks_assigned, round_robin_index
-    if workers and tasks_assigned < 20:
+    if workers and tasks_assigned < args.num_tasks:
         # Select the next worker using round-robin scheduling
         selected_worker = workers[round_robin_index % len(workers)]
         if not selected_worker['busy']:
-            assign_task_to_worker(selected_worker)
+            assign_task_to_worker(args, selected_worker)
             round_robin_index += 1
-            # print(f"Task assigned to worker {selected_worker['addr']} using Round Robin")
-
-
-
-        # Update the round-robin index to point to the next worker
-
 
         time.sleep(1)
 
@@ -190,7 +181,7 @@ if __name__ == '__main__':
     parser.add_argument("--ip", type=str, default='127.0.0.1', help="IP address")
     parser.add_argument("--port", type=int, default=9999, help="Port number")
     parser.add_argument("--max_conn", type=int, default=10, help="Maximum number of connections allowed")
-    parser.add_argument("--load_balancer", type=str, default="lowest_cpu", help="Load balancing strategy")
+    parser.add_argument("--load_balancer", type=str, default="rr", help="Load balancing strategy")
     parser.add_argument("--num_tasks",type=int, default=20, help="Number of tasks the server will assign")
     args = parser.parse_args()
     main(args)
