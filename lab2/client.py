@@ -10,7 +10,7 @@ ALL_NODES = {
     2: ('localhost', 10003)
 }
 
-class RaftClient:
+class Client:
     def __init__(self):
         self.current_leader = None
         self.last_known_leader = None
@@ -30,7 +30,6 @@ class RaftClient:
 
     def submit_value(self, value):
         """Submit a value to the cluster"""
-        # Try last known leader first, if available
         target_node = self.last_known_leader if self.last_known_leader is not None else random.choice(list(ALL_NODES.keys()))
         
         max_retries = 3
@@ -90,18 +89,39 @@ class RaftClient:
         else:
             print(f"Failed to simulate node recovery: {response.get('message', 'Unknown error')}")
 
+    def trigger_leader_change(self):
+        """Trigger a perfect leader change"""
+        if self.last_known_leader is None:
+            print("No known leader to change from. Trying random node...")
+            target_node = random.choice(list(ALL_NODES.keys()))
+        else:
+            target_node = self.last_known_leader
+            
+        response = self.send_message(target_node, {
+            'type': 'TriggerLeaderChange'
+        })
+        
+        if response and response['status'] == 'success':
+            print(f"Leader change initiated successfully")
+            print(f"Old leader: Node {response['old_leader']}")
+            print(f"New leader: Node {response['new_leader']}")
+            self.last_known_leader = response['new_leader']
+        else:
+            print(f"Failed to trigger leader change: {response.get('message', 'Unknown error')}")
+
     def print_help(self):
         """Print available commands"""
         print("\nAvailable commands:")
         print("  submit <value>    - Submit a value to the cluster")
         print("  fail <node_id>    - Simulate failure of a specific node")
         print("  recover <node_id> - Simulate recovery of a failed node")
-        print("  help             - Show this help message")
-        print("  exit             - Exit the client")
+        print("  change_leader     - Trigger a perfect leader change")
+        print("  help              - Show this help message")
+        print("  exit              - Exit the client")
 
 def main():
-    client = RaftClient()
-    print("RAFT Client Started")
+    client = Client()
+    print("Client Started...")
     print("Type 'help' for available commands")
 
     while True:
@@ -123,6 +143,9 @@ def main():
                     continue
                 value = " ".join(command[1:])
                 client.submit_value(value)
+
+            elif command[0] == "change_leader":
+                client.trigger_leader_change()
 
             elif command[0] == "fail":
                 if len(command) != 2:
