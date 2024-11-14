@@ -26,7 +26,7 @@ class Node:
         self.leader_id = None
         self.next_index = {i: 0 for i in ALL_NODES.keys()}  # Leader: next index to send for each follower
         self.match_index = {i: -1 for i in ALL_NODES.keys()}  # Leader: highest log entry known to be replicated
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         
         # Election timeout between 3-5 seconds (as per reference code)
         self.election_timeout = random.uniform(3, 5)
@@ -133,20 +133,33 @@ class Node:
     def process_message(self, message):
         """Process incoming messages based on their type"""
         print("Entered process_message...")
-        with self.lock:
-            print("Within lock in process_message")
-            if message['type'] == 'RequestVote':
-                return self.handle_request_vote(message)
-            elif message['type'] == 'AppendEntries':
-                return self.handle_append_entries(message)
-            elif message['type'] == 'SubmitValue':
-                return self.handle_submit_value(message)
-            elif message['type'] == 'SimulateFailure':
-                return self.handle_simulate_failure()
-            elif message['type'] == 'SimulateRecover':
-                return self.handle_simulate_recover()
-            else:
-                return {'status': 'error', 'message': 'Unknown message type'}
+        """Process incoming messages based on their type"""
+        try:
+            # Acquire lock with timeout to prevent deadlock
+            if not self.lock.acquire(timeout=5):
+                print("Warning: Could not acquire lock in process_message")
+                return {'status': 'error', 'message': 'Lock acquisition timeout'}
+            
+            try:
+                print("Within lock in process_message")
+                if message['type'] == 'RequestVote':
+                    return self.handle_request_vote(message)
+                elif message['type'] == 'AppendEntries':
+                    return self.handle_append_entries(message)
+                elif message['type'] == 'SubmitValue':
+                    return self.handle_submit_value(message)
+                elif message['type'] == 'SimulateFailure':
+                    return self.handle_simulate_failure()
+                elif message['type'] == 'SimulateRecover':
+                    return self.handle_simulate_recover()
+                else:
+                    return {'status': 'error', 'message': 'Unknown message type'}
+            finally:
+                self.lock.release()
+                
+        except Exception as e:
+            print(f"Error in process_message: {e}")
+            return {'status': 'error', 'message': str(e)}
 
     # def handle_request_vote(self, message):
     #     """Handle incoming vote requests"""
@@ -174,36 +187,35 @@ class Node:
     def handle_request_vote(self, message):
         """Handle incoming vote requests"""
         print("Entered handle_request_vote...")
-        with self.lock:
-            print("within lock")
-            term = message['term']
-            candidate_id = message['candidate_id']
-            
-            print(f"\nNode {self.node_id} processing RequestVote from node {candidate_id}")
-            print(f"Current term: {self.current_term}, Received term: {term}")
-            print(f"Current voted_for: {self.voted_for}")
-            
-            # Update term if necessary
-            if term > self.current_term:
-                print(f"Node {self.node_id} updating term from {self.current_term} to {term}")
-                self.current_term = term
-                self.state = 'Follower'
-                self.voted_for = None
-                self.leader_id = None
-            
-            # Check if vote can be granted
-            can_vote = (term >= self.current_term and 
-                    (self.voted_for is None or self.voted_for == candidate_id) and
-                    (len(message.get('log', [])) >= len(self.log)))
-            
-            if can_vote:
-                print(f"Node {self.node_id} granting vote to node {candidate_id}")
-                self.voted_for = candidate_id
-                self.start_election_timer()
-                return {'term': self.current_term, 'vote_granted': True}
-            
-            print(f"Node {self.node_id} rejecting vote for node {candidate_id}")
-            return {'term': self.current_term, 'vote_granted': False}
+  
+        term = message['term']
+        candidate_id = message['candidate_id']
+        
+        print(f"\nNode {self.node_id} processing RequestVote from node {candidate_id}")
+        print(f"Current term: {self.current_term}, Received term: {term}")
+        print(f"Current voted_for: {self.voted_for}")
+        
+        # Update term if necessary
+        if term > self.current_term:
+            print(f"Node {self.node_id} updating term from {self.current_term} to {term}")
+            self.current_term = term
+            self.state = 'Follower'
+            self.voted_for = None
+            self.leader_id = None
+        
+        # Check if vote can be granted
+        can_vote = (term >= self.current_term and 
+                (self.voted_for is None or self.voted_for == candidate_id) and
+                (len(message.get('log', [])) >= len(self.log)))
+        
+        if can_vote:
+            print(f"Node {self.node_id} granting vote to node {candidate_id}")
+            self.voted_for = candidate_id
+            self.start_election_timer()
+            return {'term': self.current_term, 'vote_granted': True}
+        
+        print(f"Node {self.node_id} rejecting vote for node {candidate_id}")
+        return {'term': self.current_term, 'vote_granted': False}
 
     # def handle_append_entries(self, message):
     #     """Handle incoming append entries (including heartbeats)"""
