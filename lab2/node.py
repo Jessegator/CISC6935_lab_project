@@ -31,7 +31,7 @@ class Node:
         self.match_index = {i: -1 for i in ALL_NODES.keys()}  # Leader: highest log entry known to be replicated
         self.lock = threading.RLock()
         
-        self.election_timeout = random.uniform(1, 3) # Here I set them to 1~3s
+        self.election_timeout = random.uniform(100, 500)/1000.0 # Here I set them to 1~3s
         self.last_heartbeat = time.time()
         self.election_timer = None
 
@@ -62,7 +62,7 @@ class Node:
     def send_heartbeat(self):
         """Modified heartbeat method with crash check"""
         while self.running and not self.is_crashed:
-            time.sleep(1)  # Send heartbeat every second
+            time.sleep(0.1)  # Send heartbeat every 100 msecond
             if self.state == 'Leader' and not self.is_crashed:
                 self.broadcast_append_entries()
 
@@ -132,7 +132,7 @@ class Node:
                 f.write(json.dumps(entry) + '\n')
 
     def start_server(self):
-        """Modified server start method that keeps running even when crashed"""
+
         try:
             server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
