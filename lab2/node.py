@@ -10,10 +10,11 @@ from datetime import datetime
 
 # Node configuration
 ALL_NODES = {
-    0: ('localhost', 10001),
-    1: ('localhost', 10002),
-    2: ('localhost', 10003)
+    0: ('10.128.0.5', 10001),
+    1: ('10.128.0.6', 10002),
+    2: ('10.128.0.7', 10003)
 }
+
 
 class Node:
     def __init__(self, node_id):
