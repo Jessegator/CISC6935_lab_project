@@ -32,7 +32,7 @@ class Client:
         """Submit a value to the cluster"""
         target_node = self.last_known_leader if self.last_known_leader is not None else random.choice(list(ALL_NODES.keys()))
         
-        max_retries = 3
+        max_retries = 5
         retries = 0
         
         while retries < max_retries:
@@ -60,6 +60,10 @@ class Client:
                 retries += 1
                 continue
             
+            elif response['status'] == 'error':
+                target_node = random.choice(list(ALL_NODES.keys()))
+                retries += 1
+                continue
             else:
                 print(f"Error: {response.get('message', 'Unknown error')}")
                 retries += 1
@@ -67,16 +71,34 @@ class Client:
         print("Failed to submit value after maximum retries")
         return False
 
-    def simulate_node_failure(self, node_id):
-        """Simulate failure of a specific node"""
-        print(f"Simulating failure of node {node_id}...")
-        response = self.send_message(node_id, {
-            'type': 'SimulateFailure'
+    def simulate_node_failure(self):
+        """
+        Simulate a scenario where leader crashes after appending an entry but before replication,
+        creating log inconsistency.
+        """
+        if self.last_known_leader is None:
+            print("No known leader to simulate failure. Finding leader first...")
+            # Try to find leader by submitting a value
+            if not self.submit_value("test_value"):
+                print("Failed to find leader")
+                return False
+        
+        leader_id = self.last_known_leader
+        print(f"Starting inconsistent leader failure simulation for leader node {leader_id}")
+        
+        # Step 1: Submit a special value that triggers immediate crash after append
+        response = self.send_message(leader_id, {
+            'type': 'SimulateFailure',
+            'value': f"special_value_before_crash_{time.time()}"
         })
-        if response and response['status'] == 'success':
-            print(f"Node {node_id} failure simulated successfully")
-        else:
-            print(f"Failed to simulate node failure: {response.get('message', 'Unknown error')}")
+        
+        if not response or response.get('status') != 'success':
+            print("Failed to initiate inconsistent failure simulation")
+            return False
+            
+        print("Successfully simulated inconsistent leader failure")
+        print("Leader has crashed with one unrepublicated log entry")
+        return True
 
     def simulate_node_recovery(self, node_id):
         """Simulate recovery of a specific node"""
@@ -113,7 +135,7 @@ class Client:
         """Print available commands"""
         print("\nAvailable commands:")
         print("  submit <value>    - Submit a value to the cluster")
-        print("  fail <node_id>    - Simulate failure of a specific node")
+        print("  fail_leader       - Simulate failure of the current leader")
         print("  recover <node_id> - Simulate recovery of a failed node")
         print("  change_leader     - Trigger a perfect leader change")
         print("  help              - Show this help message")
@@ -147,18 +169,8 @@ def main():
             elif command[0] == "change_leader":
                 client.trigger_leader_change()
 
-            elif command[0] == "fail":
-                if len(command) != 2:
-                    print("Usage: fail <node_id>")
-                    continue
-                try:
-                    node_id = int(command[1])
-                    if node_id not in ALL_NODES:
-                        print(f"Invalid node_id. Must be one of {list(ALL_NODES.keys())}")
-                        continue
-                    client.simulate_node_failure(node_id)
-                except ValueError:
-                    print("Node ID must be a number")
+            elif command[0] == "fail_leader":
+                client.simulate_node_failure()
 
             elif command[0] == "recover":
                 if len(command) != 2:

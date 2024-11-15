@@ -33,6 +33,11 @@ class Node:
         self.election_timeout = random.uniform(1, 3) # Here I set them to 1~3s
         self.last_heartbeat = time.time()
         self.election_timer = None
+
+        self.running = True
+        self.heartbeat_thread = None
+        self.election_thread = None
+        self.is_crashed = False
         
         # Initialize log file
         self.log_dir = "raft_logs"
@@ -42,6 +47,23 @@ class Node:
 
         self.init_log_file()
         self.load_state()
+
+    def stop_threads(self):
+        """Stop all running threads except the main server socket"""
+        self.running = False
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            self.heartbeat_thread.join(timeout=1)
+        if self.election_thread and self.election_thread.is_alive():
+            self.election_thread.join(timeout=1)
+        if self.election_timer:
+            self.election_timer.cancel()
+
+    def send_heartbeat(self):
+        """Modified heartbeat method with crash check"""
+        while self.running and not self.is_crashed:
+            time.sleep(1)  # Send heartbeat every second
+            if self.state == 'Leader' and not self.is_crashed:
+                self.broadcast_append_entries()
 
     def init_log_file(self):
 
@@ -109,30 +131,43 @@ class Node:
                 f.write(json.dumps(entry) + '\n')
 
     def start_server(self):
-        """Start the server to listen for incoming connections"""
+        """Modified server start method that keeps running even when crashed"""
+        try:
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(ALL_NODES[self.node_id])
+            server.listen(5)
+            server.settimeout(1)  # Add timeout to allow for graceful shutdown
+            print(f"Node {self.node_id} listening on {ALL_NODES[self.node_id]}")
+            
+            self.running = True
+            self.is_crashed = False
+            
+            # Start election timer
+            self.start_election_timer()
+            
+            # Start heartbeat thread
+            self.heartbeat_thread = threading.Thread(target=self.send_heartbeat)
+            self.heartbeat_thread.daemon = True
+            self.heartbeat_thread.start()
 
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # setting this option to reuse the port right away.
-        server.bind(ALL_NODES[self.node_id])
-        server.listen(5)
-        print(f"Node {self.node_id} listening on {ALL_NODES[self.node_id]}")
-        
-        # Start election timer
-        self.start_election_timer()
-        
-        # Start heartbeat thread if leader
-        self.heartbeat_thread = threading.Thread(target=self.send_heartbeat)
-        self.heartbeat_thread.daemon = True
-        self.heartbeat_thread.start()
-
-        while True:
-            try:
-                conn, addr = server.accept()
-                client_thread = threading.Thread(target=self.handle_client, args=(conn,))
-                client_thread.daemon = True
-                client_thread.start()
-            except Exception as e:
-                print(f"Error accepting connection: {e}")
+            while True:  # Keep the server socket running always
+                try:
+                    conn, addr = server.accept()
+                    client_thread = threading.Thread(target=self.handle_client, args=(conn,))
+                    client_thread.daemon = True
+                    client_thread.start()
+                except socket.timeout:
+                    # Timeout is expected, just continue
+                    continue
+                except Exception as e:
+                    if self.running:  # Only print error if we're supposed to be running
+                        print(f"Error accepting connection: {e}")
+                        
+        except Exception as e:
+            print(f"Server socket error: {e}")
+        finally:
+            server.close()
 
     def start_election_timer(self):
         """Start or restart the election timer"""
@@ -198,13 +233,6 @@ class Node:
         # Send initial empty AppendEntries
         self.broadcast_append_entries()
     
-    def send_heartbeat(self):
-            """Send periodic heartbeats if leader"""
-            while True:
-                time.sleep(1)  # Send heartbeat every second
-                if self.state == 'Leader':
-                    self.broadcast_append_entries()
-
     def broadcast_append_entries(self):
         """Broadcast AppendEntries to all followers"""
         if self.state != 'Leader':
@@ -230,13 +258,22 @@ class Node:
                     print(f"Error sending heartbeat to node {node_id}: {e}")
 
     def handle_client(self, conn):
-        """Handle incoming client connections"""
+        """Handle incoming client connections with crash awareness"""
         try:
             data = conn.recv(1024).decode()
             if data:
                 message = json.loads(data)
                 print(f"\nNode {self.node_id} received message: {message['type']} from {conn.getpeername()}")
-                response = self.process_message(message)
+                
+                # Always process recovery messages, even when crashed
+                if message['type'] == 'SimulateRecover':
+                    response = self.handle_simulate_recover()
+                # Only process other messages if not crashed
+                elif not self.is_crashed:
+                    response = self.process_message(message)
+                else:
+                    response = {'status': 'error', 'message': 'Node is crashed'}
+                
                 print(f"Node {self.node_id} sending response: {response}")
                 conn.send(json.dumps(response).encode())
         except Exception as e:
@@ -245,14 +282,22 @@ class Node:
             conn.close()
     
     def process_message(self, message):
-        """Process incoming messages based on their type"""
+        """Modified process_message to handle messages while crashed"""
         try:
-            # Acquire lock with timeout to prevent deadlock
             if not self.lock.acquire(timeout=10):
                 print("Warning: Could not acquire lock in process_message")
                 return {'status': 'error', 'message': 'Lock acquisition timeout'}
             
             try:
+                # Allow processing of recover message even when crashed
+                if message['type'] == 'SimulateRecover':
+                    return self.handle_simulate_recover()
+                    
+                # If crashed, don't process any other messages
+                if self.is_crashed:
+                    return {'status': 'error', 'message': 'Node is crashed'}
+                    
+                # Process other messages normally when not crashed
                 if message['type'] == 'RequestLogSync':
                     return self.handle_request_log_sync(message)
                 elif message['type'] == 'TriggerLeaderChange':
@@ -266,22 +311,18 @@ class Node:
                 elif message['type'] == 'SubmitValue':
                     return self.handle_submit_value(message)
                 elif message['type'] == 'SimulateFailure':
-                    return self.handle_simulate_failure()
-                elif message['type'] == 'SimulateRecover':
-                    return self.handle_simulate_recover()
+                    return self.handle_simulate_failure(message)
                 else:
                     return {'status': 'error', 'message': 'Unknown message type'}
             finally:
                 self.lock.release()
-                
+                    
         except Exception as e:
             print(f"Error in process_message: {e}")
-            return {'status': 'error', 'message': str(e)}
+            return {'status': 'error', 'message': str(e)} 
 
     def handle_request_vote(self, message):
         """Handle incoming vote requests"""
-        print("Entered handle_request_vote...")
-  
         term = message['term']
         candidate_id = message['candidate_id']
         
@@ -294,22 +335,61 @@ class Node:
             print(f"Node {self.node_id} updating term from {self.current_term} to {term}")
             self.current_term = term
             self.state = 'Follower'
-            self.voted_for = None
+            self.voted_for = None  # Reset vote for new term
             self.leader_id = None
+            self.save_state()  # Save the new term and reset vote
         
         # Check if vote can be granted
-        can_vote = (term >= self.current_term and 
-                (self.voted_for is None or self.voted_for == candidate_id) and
-                (len(message.get('log', [])) >= len(self.log)))
+        # First condition: term should be up-to-date
+        term_ok = term >= self.current_term
+        
+        # Second condition: we haven't voted for someone else in this term,
+        # or we previously voted for this candidate
+        vote_ok = (self.voted_for is None or self.voted_for == candidate_id)
+        
+        # Third condition: candidate's log is at least as complete as ours
+        log_ok = len(message.get('log', [])) >= len(self.log)
+        
+        can_vote = term_ok and vote_ok and log_ok
         
         if can_vote:
             print(f"Node {self.node_id} granting vote to node {candidate_id}")
             self.voted_for = candidate_id
+            self.save_state()  # Save our vote
             self.start_election_timer()
             return {'term': self.current_term, 'vote_granted': True}
         
         print(f"Node {self.node_id} rejecting vote for node {candidate_id}")
         return {'term': self.current_term, 'vote_granted': False}
+
+    def step_down_as_leader(self, preferred_candidate):
+        """Step down as leader and help preferred candidate win election"""
+        print(f"Node {self.node_id} stepping down with preference for node {preferred_candidate}")
+        
+        # Increment term
+        self.current_term += 1
+        self.state = 'Follower'
+        self.leader_id = None
+        self.voted_for = preferred_candidate  # Vote for preferred candidate in the new term
+        
+        # Save this state
+        self.save_state()
+        
+        # Tell other nodes about the new term via heartbeat
+        for node_id in ALL_NODES:
+            if node_id != self.node_id and node_id != preferred_candidate:
+                try:
+                    self.send_message(node_id, {
+                        'type': 'AppendEntries',
+                        'term': self.current_term,
+                        'leader_id': None,
+                        'prev_log_index': len(self.log) - 1,
+                        'prev_log_term': self.log[-1]['term'] if self.log else 0,
+                        'entries': [],
+                        'leader_commit': self.commit_index
+                    })
+                except Exception as e:
+                    print(f"Error notifying node {node_id}: {e}")
 
     def handle_append_entries(self, message):
         """Handle incoming append entries with enhanced logging"""
@@ -520,6 +600,7 @@ class Node:
         return False
 
     def handle_request_log_sync(self, message):
+
         """Handle requests for log synchronization from recovering nodes"""
         if message['term'] < self.current_term:
             return {
@@ -536,53 +617,90 @@ class Node:
             'last_applied': self.last_applied,
             'leader_id': self.leader_id
         }
-
-    def handle_simulate_failure(self):
-        """Simulate node failure by creating backups of current state"""
+    
+    def handle_simulate_failure(self, message):
+        """Simulate a leader failure with inconsistent log - leader has one extra entry"""
+        if self.state != 'Leader':
+            return {
+                'status': 'redirect',
+                'leader': self.leader_id,
+                'message': f'Not the leader. Current leader is node {self.leader_id}'
+            }
+        
         try:
+            print(f"Simulating failure of leader node {self.node_id} with inconsistent log")
+            
+            # First append new entry ONLY to leader's log
+            entry = {
+                'term': self.current_term,
+                'value': message['value']
+            }
+            entry_with_metadata = self.save_log_entry(entry)
+            self.log.append(entry_with_metadata)
+            print(f"Leader appended new entry: {entry['value']}")
+            
+            # Save backup before crashing
             backup_suffix = datetime.now().strftime('%Y%m%d_%H%M%S')
             backup_dir = os.path.join(self.log_dir, f"backup_{backup_suffix}")
             os.makedirs(backup_dir, exist_ok=True)
-
-            # Save current state before "failing"
+            
+            # Backup current files with the inconsistent log
             if os.path.exists(self.log_file):
                 backup_log = os.path.join(backup_dir, f"node_{self.node_id}_log.json")
                 with open(self.log_file, 'r') as src, open(backup_log, 'w') as dst:
                     dst.write(src.read())
-                
+            
             if os.path.exists(self.state_file):
                 backup_state = os.path.join(backup_dir, f"node_{self.node_id}_state.json")
                 with open(self.state_file, 'r') as src, open(backup_state, 'w') as dst:
                     dst.write(src.read())
-
+            
             # Save backup location for recovery
             self.backup_location = backup_dir
-                    
-            # Clear current state
+            
+            # Immediately crash - don't even try to replicate
+            self.is_crashed = True
+            self.stop_threads()
+            
+            # Clear state
+            self.state = 'Follower'
             self.log = []
             self.commit_index = -1
             self.last_applied = -1
+            self.leader_id = None
+            self.voted_for = None
             
-            # Delete current files to simulate complete failure
+            # Delete current files
             if os.path.exists(self.log_file):
                 os.remove(self.log_file)
             if os.path.exists(self.state_file):
                 os.remove(self.state_file)
+            
+            print(f"Leader node {self.node_id} crashed with one extra log entry")
+            return {
+                'status': 'success',
+                'message': f'Leader node {self.node_id} crashed with inconsistent log state'
+            }
                 
-            print(f"Node {self.node_id} state backed up to {backup_dir}")
-            return {'status': 'success', 'message': f'Node {self.node_id} failed and backed up to {backup_dir}'}
         except Exception as e:
+            print(f"Error in failure simulation: {e}")
             return {'status': 'error', 'message': str(e)}
 
     def handle_simulate_recover(self):
-        """Recover node from most recent backup before syncing with cluster"""
+        """Handle recovery with improved error handling"""
         try:
+            print(f"Node {self.node_id} starting recovery process...")
+            
+            # Reset crash flag
+            self.is_crashed = False
+            self.running = True
+            
             # Find most recent backup
             backup_dirs = [d for d in os.listdir(self.log_dir) if d.startswith('backup_')]
             if not backup_dirs:
                 print(f"No backup found for node {self.node_id}, proceeding with clean recovery")
                 return self.recover_without_backup()
-                
+            
             latest_backup = max(backup_dirs)
             backup_dir = os.path.join(self.log_dir, latest_backup)
             
@@ -594,15 +712,14 @@ class Node:
             if os.path.exists(backup_state):
                 with open(backup_state, 'r') as src, open(self.state_file, 'w') as dst:
                     dst.write(src.read())
-                self.load_state()  # Load the restored state
+                self.load_state()
                 print(f"Restored state from backup: Term={self.current_term}, State={self.state}")
             
-            # Restore log file
+            # Restore log file and entries
             if os.path.exists(backup_log):
                 with open(backup_log, 'r') as src, open(self.log_file, 'w') as dst:
                     dst.write(src.read())
                 
-                # Reload log entries
                 self.log = []
                 with open(self.log_file, 'r') as f:
                     for line in f:
@@ -611,18 +728,25 @@ class Node:
                             self.log.append(entry)
                 print(f"Restored {len(self.log)} log entries from backup")
             
-            # After restoring from backup, sync with cluster to catch up on any missed entries
-            success = self.sync_with_cluster()
-            if success:
-                print(f"Node {self.node_id} successfully recovered from backup and synced with cluster")
-                self.start_election_timer()
-                return {'status': 'success', 'message': f'Node {self.node_id} recovered from backup and synchronized'}
-            else:
-                return {'status': 'error', 'message': 'Failed to sync with cluster after recovery'}
+            # Start necessary threads
+            self.heartbeat_thread = threading.Thread(target=self.send_heartbeat)
+            self.heartbeat_thread.daemon = True
+            self.heartbeat_thread.start()
+            
+            self.start_election_timer()
+            
+            print(f"Node {self.node_id} recovered successfully")
+            return {
+                'status': 'success',
+                'message': f'Node {self.node_id} recovered successfully'
+            }
                 
         except Exception as e:
             print(f"Error during recovery: {e}")
-            return {'status': 'error', 'message': str(e)}
+            return {
+                'status': 'error',
+                'message': f'Recovery failed: {str(e)}'
+            }
 
     def handle_trigger_leader_change(self):
         """Handle the perfect leader change request"""
@@ -714,14 +838,6 @@ class Node:
 
         # Among fully synced candidates, choose one randomly
         return random.choice(fully_synced_candidates)
-
-    def step_down_as_leader(self, preferred_candidate):
-        """Step down as leader and help preferred candidate win election"""
-        self.state = 'Follower'
-        self.voted_for = preferred_candidate
-        self.leader_id = None
-        self.current_term += 1  # Increment term to trigger new election
-        self.save_state()
 
     def handle_query_state(self, message):
         """Handle query about node's current state"""
