@@ -5,9 +5,9 @@ import time
 import sys
 
 ALL_NODES = {
-    0: ('10.128.0.9', 10001),
-    1: ('10.128.0.10', 10002),
-    2: ('10.128.0.11', 10003)
+    0: ('localhost', 10001),
+    1: ('localhost', 10002),
+    2: ('localhost', 10003)
 }
 
 class Client:
