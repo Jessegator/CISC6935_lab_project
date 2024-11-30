@@ -1,106 +1,83 @@
-# client.py
 from xmlrpc.client import ServerProxy
-import time
 
 class Client:
     def __init__(self):
-        self.coordinator = ServerProxy("http://localhost:8001")
-        self.node2 = ServerProxy("http://localhost:8002")
-        self.node3 = ServerProxy("http://localhost:8003")
+        self.coordinator = ServerProxy("http://localhost:8001", allow_none=True)
     
-    def reset_for_scenario(self, scenario):
+    def reset_for_scenario(self, scenario,crash_scenario=None):
         """Reset balances for different test scenarios"""
-        print(f"\nResetting for scenario {scenario}")
-        self.node2.reset_balance(scenario)
-        self.node3.reset_balance(scenario)
-        print("Initial balances after reset:")
+        print(f"\nResetting for scenario {scenario.upper()}")
+        self.coordinator.reset_scenario(scenario,crash_scenario)
+        print("Initial balances:")
         self.print_balances()
         print("-" * 50)
 
     def print_balances(self):
+        """Print current account balances"""
         try:
-            print(f"Account A balance: {self.node2.get_balance()}")
-            print(f"Account B balance: {self.node3.get_balance()}")
+            balances = self.coordinator.get_balances()
+            print(f"Account A balance: {balances['2']}")  # Use string keys
+            print(f"Account B balance: {balances['3']}")
         except Exception as e:
             print(f"Error getting balances: {e}")
         
     def execute_transaction(self, transaction, crash_scenario=None):
+        """Execute a single transaction with error handling"""
         print(f"\nExecuting transaction: {transaction}")
         if crash_scenario:
             print(f"With crash scenario: {crash_scenario}")
-        print("Initial balances:")
-        self.print_balances()
         
-        # Set up crash scenario if specified
-        if crash_scenario == 'c1':
-            self.node2.set_crash_scenario('c1', 'before')
-        elif crash_scenario == 'c2':
-            self.node2.set_crash_scenario('c2', 'after')
-        
-        # Phase 1: Prepare
         try:
-            prepare_a = self.node2.prepare(transaction)
-            if not prepare_a:
-                if transaction['type'] == 'transfer':
-                    print(f"Transaction failed: Insufficient funds in Account A for transfer of {transaction['amount']}")
-                else:
-                    print("Transaction failed: Account A cannot prepare for the transaction")
-                self.node2.abort()
-                self.node3.abort()
-                return False
-
-            prepare_b = self.node3.prepare(transaction)
-            if not prepare_b:
-                print("Transaction failed: Account B cannot prepare for the transaction")
-                self.node2.abort()
-                self.node3.abort()
-                return False
-            
-            if prepare_a and prepare_b:
-                # Simulate coordinator crash before commit if specified
-                if crash_scenario == 'c3':
-                    print("Simulating coordinator crash for 30 seconds...")
-                    time.sleep(30)
-                
-                # Phase 2: Commit
-                commit_a = self.node2.commit(transaction)
-                commit_b = self.node3.commit(transaction)
-                
-                if commit_a and commit_b:
-                    print("Transaction completed successfully")
-                else:
-                    self.node2.abort()
-                    self.node3.abort()
-                    print("Transaction aborted during commit phase")
-            else:
-                self.node2.abort()
-                self.node3.abort()
-                print("Transaction aborted during prepare phase")
-                
+            result = self.coordinator.execute_transaction(transaction, crash_scenario)
+            print(f"Transaction result: {result['message']}")
+            print("Current balances:")
+            self.print_balances()
+            return result['status'] == 'success'
         except Exception as e:
             print(f"Error during transaction: {e}")
-            try:
-                self.node2.abort()
-                self.node3.abort()
-            except:
-                print("Could not abort transaction on all nodes")
-            print("Transaction aborted due to error")
+            return False
             
+    def run_scenario_transactions(self, scenario, crash_scenario=None):
+        """Execute both transactions consecutively"""
+        print(f"\n=== Running Scenario {scenario.upper()} ===")
+        self.reset_for_scenario(scenario,crash_scenario)
+        
+        # Transaction 1: Transfer 100 from A to B
+        print("\nTransaction 1: Transfer 100 from A to B")
+        transfer_result = self.execute_transaction({
+            'type': 'transfer',
+            'amount': 100
+        }, crash_scenario)
+        
+        if not transfer_result:
+            print("\nWARNING: Transfer transaction failed")
+        
+        # Transaction 2: Add 20% bonus to both accounts
+        # Always attempt bonus transaction even if transfer failed
+        print("\nTransaction 2: Add 20% bonus to both accounts")
+        bonus_result = self.execute_transaction({
+            'type': 'bonus'
+        }, crash_scenario)
+        
+        if not bonus_result:
+            print("\nWARNING: Bonus transaction failed")
+        
+        print("\nScenario completed")
         print("Final balances:")
         self.print_balances()
         print("-" * 50)
-        return True
 
 def print_menu():
+    """Print main menu"""
     print("\n=== 2PC Transaction Simulator ===")
     print("1. Scenario A: Normal operation (A=200, B=300)")
     print("2. Scenario B: Insufficient funds (A=90, B=50)")
     print("3. Scenario C: Node crash simulation (A=200, B=300)")
-    print("4. Custom transaction")
-    print("5. Print current balances")
-    print("6. Exit")
+    print("4. Print current balances")
+    print("5. Exit")
 
 def handle_scenario_c():
+    """Handle crash scenario selection"""
     print("\nScenario C options:")
     print("1. Node-2 crashes before responding")
     print("2. Node-2 crashes after responding")
@@ -112,84 +89,29 @@ def main():
     
     while True:
         print_menu()
-        choice = input("\nEnter your choice (1-6): ")
+        choice = input("\nEnter your choice (1-5): ")
         
         if choice == '1':
-            client.reset_for_scenario('a')
-            print("\nChoose transaction type:")
-            print("1. Transfer 100 from A to B")
-            print("2. Add 20% bonus to both accounts")
-            sub_choice = input("Enter choice (1-2): ")
-            
-            if sub_choice == '1':
-                client.execute_transaction({
-                    'type': 'transfer',
-                    'amount': 100
-                })
-            elif sub_choice == '2':
-                client.execute_transaction({
-                    'type': 'bonus'
-                })
-                
+            client.run_scenario_transactions('a')
         elif choice == '2':
-            client.reset_for_scenario('b')
-            print("\nChoose transaction type:")
-            print("1. Transfer 100 from A to B (should fail)")
-            print("2. Add 20% bonus to both accounts")
-            sub_choice = input("Enter choice (1-2): ")
-            
-            if sub_choice == '1':
-                client.execute_transaction({
-                    'type': 'transfer',
-                    'amount': 100
-                })
-            elif sub_choice == '2':
-                client.execute_transaction({
-                    'type': 'bonus'
-                })
-                
+            client.run_scenario_transactions('b')
         elif choice == '3':
-            client.reset_for_scenario('c')
             crash_choice = handle_scenario_c()
-            print("\nChoose transaction type:")
-            print("1. Transfer 100 from A to B")
-            print("2. Add 20% bonus to both accounts")
-            sub_choice = input("Enter choice (1-2): ")
+            crash_scenario = None
             
-            transaction = {
-                'type': 'transfer' if sub_choice == '1' else 'bonus'
-            }
-            if sub_choice == '1':
-                transaction['amount'] = 100
-                
             if crash_choice == '1':
-                client.execute_transaction(transaction, 'c1')
+                crash_scenario = 'c1' # Node 2 crash before responding
             elif crash_choice == '2':
-                client.execute_transaction(transaction, 'c2')
+                crash_scenario = 'c2' # Node 2 crash after responding
             elif crash_choice == '3':
-                client.execute_transaction(transaction, 'c3')
-            
+                crash_scenario = 'c3'
+                
+            client.run_scenario_transactions('c', crash_scenario)
         elif choice == '4':
-            print("\nCustom Transaction:")
-            tx_type = input("Enter transaction type (transfer/bonus): ").lower()
-            if tx_type == 'transfer':
-                amount = float(input("Enter transfer amount: "))
-                client.execute_transaction({
-                    'type': 'transfer',
-                    'amount': amount
-                })
-            elif tx_type == 'bonus':
-                client.execute_transaction({
-                    'type': 'bonus'
-                })
-        
-        elif choice == '5':
             client.print_balances()
-            
-        elif choice == '6':
+        elif choice == '5':
             print("Exiting simulator...")
             break
-            
         else:
             print("Invalid choice! Please try again.")
 
