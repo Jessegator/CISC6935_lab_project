@@ -24,7 +24,7 @@ class RaftNode:
         self.votes_received = set()
         self.last_heartbeat = 0
         self.peers = {
-            port: ServerProxy(f"http://{ip_port}", allow_none=True)
+            ip_port: ServerProxy(f"http://{ip_port}", allow_none=True)
             for ip_port in peer_ip_ports
         }
         
