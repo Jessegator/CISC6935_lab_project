@@ -7,11 +7,11 @@ import argparse
 from node import Node
 
 class RaftNode:
-    def __init__(self, node_id, node_ip, port, peer_ports, leader_id):
+    def __init__(self, node_id, node_ip, port, peer_ip_ports, leader_id):
         self.node_id = node_id
         self.node_ip = node_ip
         self.port = port
-        self.peer_ports = peer_ports
+        self.peer_ip_ports = peer_ip_ports
         self.leader_id = leader_id  # 2 or 3
         
         # Raft state
@@ -24,8 +24,8 @@ class RaftNode:
         self.votes_received = set()
         self.last_heartbeat = 0
         self.peers = {
-            port: ServerProxy(f"{node_ip}:{port}", allow_none=True)
-            for port in peer_ports
+            port: ServerProxy(f"http://{ip_port}", allow_none=True)
+            for ip_port in peer_ip_ports
         }
         
         # Account state
@@ -337,28 +337,29 @@ def main():
     parser.add_argument('--ip', type=str, required=True, help="Node IP")
     parser.add_argument('--port', type=int, required=True, help="Main port for 2PC")
     parser.add_argument('--raft_port', type=int, required=True, help="Port for Raft consensus")
-    parser.add_argument('--peer_ports', type=str, required=True, help="Comma-separated list of peer Raft ports")
+    parser.add_argument('--peer_ip_ports', type=str, required=True, help="Comma-separated list of peer Raft ports")
     parser.add_argument('--is_leader', type=bool, default=False, help="Whether this node is a leader")
     parser.add_argument('--leader_id', type=int, help="ID of the leader node (2 or 3)")
     
     args = parser.parse_args()
     
     # Convert peer_ports string to list of integers
-    peer_ports = [int(p) for p in args.peer_ports.split(',')]
+    peer_ip_ports = [p for p in args.peer_ports.split(',')]
     
     # Create enhanced node with Raft support
     node = EnhancedNode(
         node_id=args.node_id,
+        node_ip = args.ip,
         port=args.port,
         raft_port=args.raft_port,
-        peer_ports=peer_ports,
+        peer_ports=peer_ip_ports,
         leader_id=args.leader_id
     )
     
     print(f"Starting Enhanced Node {args.node_id}")
     print(f"Main port (2PC): {args.port}")
     print(f"Raft port: {args.raft_port}")
-    print(f"Peer ports: {peer_ports}")
+    print(f"Peer ip_ports: {peer_ip_ports}")
     print(f"Is leader: {args.is_leader}")
     
     # Start the node's server
