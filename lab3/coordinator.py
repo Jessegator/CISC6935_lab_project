@@ -15,8 +15,8 @@ class Coordinator:
         self.node_ip = node_ip
         # Modify the ip addressof participants correspondingly
         self.nodes = {
-            2: ServerProxy(f"10.128.0.10:8002", allow_none=True),
-            3: ServerProxy(f"10.128.0.11:8003", allow_none=True)
+            2: ServerProxy(f"http://10.128.0.10:8002", allow_none=True),
+            3: ServerProxy(f"http://10.128.0.11:8003", allow_none=True)
         }
         self.transaction_log = []
         self.setup_server()
