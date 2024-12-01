@@ -94,7 +94,7 @@ class Node:
         if self.node_id == 2 and self.crash_scenario == 'c2' and self.crash_point == 'after' and self.crash_times < 1:
             self.crash_times += 1
             self.simulate_crash()
-            # return False
+            return False
 
         print(f"Node {self.node_id}: Received commit for transaction")
         success = self.apply_transaction(transaction)
@@ -139,9 +139,13 @@ class Node:
         self.transaction_log.append(log_entry)
 
     def check_if_committed(self, transaction_id):
-
-        if self.transaction_log[-1]['transaction']['transaction_id'] == transaction_id:
-            return True
+        
+        last_transaction = self.transaction_log[-1]
+        if last_transaction['transaction']['transaction_id'] == transaction_id:
+            if last_transaction['state'] == 'COMMITTED':
+                return True
+            else:
+                return False
         else:
             return False
         
@@ -190,6 +194,7 @@ class Node:
         self.crash_point = None
         self.transaction_log = []
         self.prepared_transactions = {}
+        self.crash_times = 0
         return True
     
     def run(self):

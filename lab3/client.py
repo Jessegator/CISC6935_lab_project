@@ -40,7 +40,7 @@ class Client:
     def run_scenario_transactions(self, scenario, crash_scenario=None):
         """Execute both transactions consecutively"""
         print(f"\n=== Running Scenario {scenario.upper()} ===")
-        self.reset_for_scenario(scenario,crash_scenario)
+        self.reset_for_scenario(scenario, crash_scenario)
         
         # Transaction 1: Transfer 100 from A to B
         print("\nTransaction 1: Transfer 100 from A to B")
