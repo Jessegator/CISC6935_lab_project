@@ -287,7 +287,7 @@ class RaftNode:
                     [log_entry],
                     self.commit_index
                 )
-                print(f"Reset balance replicated to peer {peer_port}: {success}, balance: {peer.balance}")
+                print(f"Reset balance replicated to peer {peer_port}: {success}")
             except Exception as e:
                 print(f"Error resetting balance for peer {peer_port}: {e}")
         
