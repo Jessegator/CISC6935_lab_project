@@ -220,5 +220,5 @@ if __name__ == "__main__":
     parser.add_argument("--id", type=int, default=1, help="Node ID")
     parser.add_argument("--is_coord",action="store_true",default=False, help="If this node is coordinator")
     args = parser.parse_args()
-    coordinator = Coordinator()
+    coordinator = Coordinator(args.ip, args.port)
     coordinator.run()
