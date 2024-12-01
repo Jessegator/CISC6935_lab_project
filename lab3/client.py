@@ -2,8 +2,8 @@ from xmlrpc.client import ServerProxy
 
 class Client:
     def __init__(self):
-        # Modify the ip address of the coordinator correspondingly
-        self.coordinator = ServerProxy("http://10.128.0.09", allow_none=True)
+        # Modify the ip address and port number of the coordinator correspondingly
+        self.coordinator = ServerProxy("http://10.128.0.09:8001", allow_none=True)
     
     def reset_for_scenario(self, scenario,crash_scenario=None):
         """Reset balances for different test scenarios"""
