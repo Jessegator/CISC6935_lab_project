@@ -344,7 +344,7 @@ def main():
     args = parser.parse_args()
     
     # Convert peer_ports string to list of integers
-    peer_ip_ports = [p for p in args.peer_ports.split(',')]
+    peer_ip_ports = [p for p in args.peer_ip_ports.split(',')]
     
     # Create enhanced node with Raft support
     node = EnhancedNode(
