@@ -5,21 +5,24 @@ import threading
 import logging
 import time
 import socket
+import argparse
 
 TIMEOUT = 5  # Timeout in seconds for node responses
 
 class Coordinator:
-    def __init__(self, port=8001):
+    def __init__(self, node_ip, port=8001):
         self.port = port
+        self.node_ip = node_ip
+        # Modify the ip addressof participants correspondingly
         self.nodes = {
-            2: ServerProxy("http://localhost:8002", allow_none=True),
-            3: ServerProxy("http://localhost:8003", allow_none=True)
+            2: ServerProxy(f"10.128.0.10:8002", allow_none=True),
+            3: ServerProxy(f"10.128.0.11:8003", allow_none=True)
         }
         self.transaction_log = []
         self.setup_server()
         
     def setup_server(self):
-        self.server = SimpleXMLRPCServer(("localhost", self.port), allow_none=True)
+        self.server = SimpleXMLRPCServer((self.node_ip, self.port), allow_none=True)
         self.server.register_function(self.execute_transaction, "execute_transaction")
         self.server.register_function(self.get_balances, "get_balances")
         self.server.register_function(self.reset_scenario, "reset_scenario")
@@ -211,5 +214,11 @@ class Coordinator:
         self.server.serve_forever()
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="CISC-6935 lab-3 coordinator")
+    parser.add_argument("--ip", type=str, default='localhost', help="IP address")
+    parser.add_argument("--port", type=int, default=8001, help="Port number")
+    parser.add_argument("--id", type=int, default=1, help="Node ID")
+    parser.add_argument("--is_coord",action="store_true",default=False, help="If this node is coordinator")
+    args = parser.parse_args()
     coordinator = Coordinator()
     coordinator.run()

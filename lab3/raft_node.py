@@ -7,8 +7,9 @@ import argparse
 from node import Node
 
 class RaftNode:
-    def __init__(self, node_id, port, peer_ports, leader_id):
+    def __init__(self, node_id, node_ip, port, peer_ports, leader_id):
         self.node_id = node_id
+        self.node_ip = node_ip
         self.port = port
         self.peer_ports = peer_ports
         self.leader_id = leader_id  # 2 or 3
@@ -23,7 +24,7 @@ class RaftNode:
         self.votes_received = set()
         self.last_heartbeat = 0
         self.peers = {
-            port: ServerProxy(f"http://localhost:{port}", allow_none=True)
+            port: ServerProxy(f"{node_ip}:{port}", allow_none=True)
             for port in peer_ports
         }
         
@@ -292,9 +293,9 @@ class RaftNode:
                 print(f"Error resetting balance for peer {peer_port}: {e}")
         
 class EnhancedNode(Node):
-    def __init__(self, node_id, port, raft_port, peer_ports, leader_id):
-        super().__init__(node_id, port)
-        self.raft_node = RaftNode(node_id, raft_port, peer_ports, leader_id)
+    def __init__(self, node_id, node_ip, port, raft_port, peer_ports, leader_id):
+        super().__init__(node_id, node_ip, port)
+        self.raft_node = RaftNode(node_id, node_ip, raft_port, peer_ports, leader_id)
         self.server.register_function(self.request_vote, "request_vote")
         self.server.register_function(self.append_entries, "append_entries")
         self.server.register_function(self.reset_balance, "reset_balance")
@@ -331,8 +332,9 @@ class EnhancedNode(Node):
         return True
 
 def main():
-    parser = argparse.ArgumentParser(description="Raft Node Server")
+    parser = argparse.ArgumentParser(description="Raft Nodes")
     parser.add_argument('--node_id', type=int, required=True, help="Node ID")
+    parser.add_argument('--ip', type=str, required=True, help="Node IP")
     parser.add_argument('--port', type=int, required=True, help="Main port for 2PC")
     parser.add_argument('--raft_port', type=int, required=True, help="Port for Raft consensus")
     parser.add_argument('--peer_ports', type=str, required=True, help="Comma-separated list of peer Raft ports")

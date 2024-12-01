@@ -7,8 +7,9 @@ import threading
 import argparse
 
 class Node:
-    def __init__(self, node_id, port):
+    def __init__(self, node_id, node_ip, port):
         self.node_id = node_id
+        self.node_ip = node_ip
         self.port = port
         self.account_file = f"account_{node_id}.txt"
         self.transaction_log = []
@@ -26,7 +27,7 @@ class Node:
         self.setup_server()
     
     def setup_server(self):
-        self.server = SimpleXMLRPCServer(("localhost", self.port), allow_none=True)
+        self.server = SimpleXMLRPCServer((self.node_ip, self.port), allow_none=True)
         self.server.register_function(self.prepare, "prepare")
         self.server.register_function(self.commit, "commit")
         self.server.register_function(self.abort, "abort")
@@ -202,11 +203,11 @@ class Node:
         self.server.serve_forever()
 
 def main(args):
-    node = Node(args.id, args.port)
+    node = Node(args.id, args.ip, args.port)
     node.run()
 
 if __name__== "__main__":
-    parser = argparse.ArgumentParser(description="CISC-6935 lab-1 server")
+    parser = argparse.ArgumentParser(description="CISC-6935 lab-3 node")
     parser.add_argument("--ip", type=str, default='localhost', help="IP address")
     parser.add_argument("--port", type=int, default=8001, help="Port number")
     parser.add_argument("--id", type=int, default=1, help="Node ID")
